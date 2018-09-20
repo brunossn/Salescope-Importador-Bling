@@ -14,7 +14,6 @@ namespace BlingImportador
         static Logger logger;
         static string apiKey;
 
-        const string PASTA_SAIDA = "output/";
         const string NOME_ARQUIVO_LOG = "importador.log";
         const string LAYOUT_ARQUIVO_LOG = "${longdate}|${level}|${message} ${exception:format=tostring,data:maxInnerExceptionLevel=10:separator=\t}";
         const string ENCODING_KEY = "ISO-8859-1";
@@ -36,16 +35,17 @@ namespace BlingImportador
         {
             if (!ValidaParametros(args)) return;
 
-            apiKey = args.FirstOrDefault(a => a != "-d");
+            var argumentosSemD = args.Where(a => a != "-d").ToArray();
+
+            apiKey = argumentosSemD[0];
 
             InicializarLog();
-            CriarPastaSaida();
             CarregarProdutos();
 
             try
             {
                 logger.Info("Iniciando importação...");
-                GerarArquivo();
+                GerarArquivo(argumentosSemD[1]);
                 logger.Info("Importação finalizada, arquivo gerado com sucesso");
             }
             catch (Exception e)
@@ -67,24 +67,34 @@ namespace BlingImportador
 
         private static bool ValidaParametros(string[] args)
         {
-            if (args.Length == 0 || !args.Any(arg => arg != "-d"))
+            var argumentosSemD = args.Where(a => a != "-d").ToArray();
+
+            // Número de argumentos
+            if (argumentosSemD.Count() != 2)
             {
-                Console.WriteLine("Execute novamente o importador passando seu token de acesso à API por parâmetro");
-                Console.ReadKey();
+                Console.WriteLine("Execute novamente o importador passando parâmetros, no seguinte formato:");
+                Console.WriteLine("BlingImportador.exe [token do cliente no Bling] [caminho do CSV que será gerado]");
                 return false;
+            }
+
+            // Diretório de saída
+            var diretorio = Path.GetDirectoryName(argumentosSemD[1]);
+
+            if(!Directory.Exists(diretorio))
+            {
+                try
+                {
+                    Directory.CreateDirectory(diretorio);
+                }
+                catch
+                {
+                    Console.WriteLine($"Não foi possível criar o diretório {diretorio}");
+                }
             }
 
             return true;
         }
-
-        /// <summary>
-        /// Método que cria a pasta de saída
-        /// </summary>
-        private static void CriarPastaSaida()
-        {
-            Directory.CreateDirectory(PASTA_SAIDA);
-        }
-
+        
         /// <summary>
         /// Método que carrega os produtos, pois na consulta de pedidos da API Rest, os itens não carregam os dados mercadológicos
         /// </summary>
@@ -168,13 +178,19 @@ namespace BlingImportador
         /// <summary>
         /// Método que realiza a criação do arquivo e gravação dos registros
         /// </summary>
-        private static void GerarArquivo()
+        private static void GerarArquivo(string arquivoCSV)
         {
             // A princípio, esta informação é para gerar o arquivo. Deverá ser usado na paginação, para determinar uma data de corte na consulta
             var dtImportacao = DateTime.Now;
 
             // Criando o arquivo por data, e com encoding do windows
-            using (var sw = new StreamWriter(PASTA_SAIDA + "/arq-" + dtImportacao.ToString("yyyy-MM-dd") + ".csv", false, Encoding.GetEncoding(ENCODING_KEY)))
+            if (!File.Exists(arquivoCSV))
+            {
+                var arquivo = File.Create(arquivoCSV);
+                arquivo.Close();
+            }
+
+            using (var sw = new StreamWriter(arquivoCSV, false, Encoding.GetEncoding(ENCODING_KEY)))
             {
                 // Paginação
                 int page = 1;
