@@ -33,7 +33,15 @@ namespace BlingImportador
         /// <param name="args">Parâmetros do programa</param>
         static void Main(string[] args)
         {
-            if (!ValidaParametros(args)) return;
+            if (!ValidaParametros(args)) 
+            {
+                if (args.Contains("-d"))
+                {
+                    Console.WriteLine("\nPressione uma tecla para continuar ...");
+                    Console.ReadKey();
+                }
+                return;
+            }
 
             var argumentosSemD = args.Where(a => a != "-d").ToArray();
 
@@ -261,7 +269,7 @@ namespace BlingImportador
             var segmento = "";
             var nomeCliente = ((string)cliente["nome"]).Left(50);
             var complementar = "";
-            var dataEmissao = Convert.ToDateTime((string)pedido["data"]);
+            var dataEmissao = notaFiscal == null ? Convert.ToDateTime((string)pedido["data"]) : Convert.ToDateTime((string)notaFiscal["dataEmissao"]);
             var endereco = String.Format("{0}, {1}, {2}", (string)cliente["endereco"], (string)cliente["bairro"], ((string)cliente["numero"]).Left(150));
             var cep = (string)cliente["cep"];
             var telefone = String.IsNullOrEmpty((string)cliente["fone"]) ? NAO_DISPONIVEL : ((string)cliente["fone"]).Replace("(", "").Replace(")", "").Replace("-", "").Replace(" ", "");
