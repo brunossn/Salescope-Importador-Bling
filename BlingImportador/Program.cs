@@ -22,7 +22,7 @@ namespace BlingImportador
         const string URL_PEDIDO = "pedidos/page=[page]/json?filters=idSituacao[9]&apikey=[apikey]";
         const string URL_PRODUTO = "produtos/page=[page]/json?apikey=[apikey]";
 
-        const string CABECALHO_KEY = "NF; Filial; Estado; Cidade; Situação; Região; Gerente; Representante; Canal; Segmento; Marca; Linha; Grupo; Subgrupo; Produto; Cliente; Coringa; Dia; Mês; Ano; Valor; Rentabilidade; Quantidade; Litros; Quilos; Metros; CNPJ - Inicio; CNPJ - Fim; Endereço; CEP; Telefone; Email; Observações do cliente";
+        const string CABECALHO_KEY = "NF; Filial; Estado; Cidade; Região; Gerente; Representante; Canal; Segmento; Marca; Linha; Grupo; Subgrupo; Produto; Cliente; Coringa; Dia; Mês; Ano; Valor; Rentabilidade; Quantidade; Litros; Quilos; Metros; CNPJ - Inicio; CNPJ - Fim; Endereço; CEP; Telefone; Email; Observações do cliente";
         const string NAO_DISPONIVEL = "ND";
 
         static int qtdeRequest = 0, qtdeProdutos = 0;
@@ -267,7 +267,6 @@ namespace BlingImportador
             var estado = (string)cliente["uf"];
             var cidade = ((string)cliente["cidade"]).Left(50);
             var situacao = notaFiscal == null ? "PEDIDO EM ABERTO" : "NOTA EMITIDA";
-            var regiao = "Única";
             var gerente = "Interno";
             var representante = pedido["vendedor"] != null ? (string)pedido["vendedor"] : "";
             var canal = "Varejo";
@@ -308,13 +307,12 @@ namespace BlingImportador
                 if (!String.IsNullOrEmpty(registro)) registro += Environment.NewLine;
 
                 // Gerando a string com os dados necessários e concatenando.
-                registro += String.Format("{0};{1};{2};{3};{4};{5};{6};{7};{8};{9};{10};{11};{12};{13};{14};{15};{16};{17};{18};{19};{20};{21};{22};{23};{24};{25};{26};{27};{28};{29};{30};{31};{32}"
+                registro += String.Format("{0};{1};{2};{3};{4};{5};{6};{7};{8};{9};{10};{11};{12};{13};{14};{15};{16};{17};{18};{19};{20};{21};{22};{23};{24};{25};{26};{27};{28};{29};{30};{31}"
                         , nf.Left(10)                                                       // Nota Fiscal ou Pedido
                         , filial.Left(50)                                                   // Filial
                         , estado.Left(2)                                                    // Estado
                         , cidade.Left(50)                                                   // Cidade
-                        , situacao                                                          // Situação
-                        , regiao.Left(50)                                                   // Região
+                        , situacao                                                          // Região (usado para situação)
                         , gerente.Left(50)                                                  // Gerente
                         , representante.Left(50)                                            // Representante
                         , canal.Left(50)                                                    // Canal
