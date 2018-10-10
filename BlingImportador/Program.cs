@@ -13,13 +13,14 @@ namespace BlingImportador
     {
         static Logger logger;
         static string apiKey;
+        static string dataInicial;
 
         const string NOME_ARQUIVO_LOG = "importador.log";
         const string LAYOUT_ARQUIVO_LOG = "${longdate}|${level}|${message} ${exception:format=tostring,data:maxInnerExceptionLevel=10:separator=\t}";
         const string ENCODING_KEY = "ISO-8859-1";
 
         const string URL_BASE = "https://bling.com.br/Api/v2/";
-        const string URL_PEDIDO = "pedidos/page=[page]/json?filters=idSituacao[9]&apikey=[apikey]";
+        const string URL_PEDIDO = "pedidos/page=[page]/json?filters=idSituacao[9];dataEmissao[dataInicial TO dataFinal]&apikey=[apikey]";
         const string URL_PRODUTO = "produtos/page=[page]/json?apikey=[apikey]";
 
         const string CABECALHO_KEY = "NF; Filial; Estado; Cidade; Região; Gerente; Representante; Canal; Segmento; Marca; Linha; Grupo; Subgrupo; Produto; Cliente; Coringa; Dia; Mês; Ano; Valor; Rentabilidade; Quantidade; Litros; Quilos; Metros; CNPJ - Inicio; CNPJ - Fim; Endereço; CEP; Telefone; Email; Observações do cliente";
@@ -46,6 +47,7 @@ namespace BlingImportador
             var argumentosSemD = args.Where(a => a != "-d").ToArray();
 
             apiKey = argumentosSemD[0];
+            dataInicial = argumentosSemD[2];
 
             InicializarLog();
             CarregarProdutos();
@@ -78,10 +80,11 @@ namespace BlingImportador
             var argumentosSemD = args.Where(a => a != "-d").ToArray();
 
             // Número de argumentos
-            if (argumentosSemD.Count() != 2)
+            if (argumentosSemD.Count() != 3)
             {
                 Console.WriteLine("Execute novamente o importador passando parâmetros, no seguinte formato:");
-                Console.WriteLine("BlingImportador.exe [token do cliente no Bling] [caminho do CSV que será gerado]");
+                Console.WriteLine("BlingImportador.exe [token do cliente no Bling] [caminho do CSV que será gerado] [data inicial].");
+                Console.WriteLine("Exemplo: BlingImportador.exe b1dbaad81019d6js8ad00si \"c:\\Salescope\\Saida.csv\" 01/01/2010");
                 return false;
             }
 
@@ -215,7 +218,13 @@ namespace BlingImportador
                 do
                 {
                     // Inicializando o request na api rest, para cada página
-                    client = new RestClient((URL_BASE + URL_PEDIDO).Replace("[page]", page.ToString()).Replace("[apikey]", apiKey));
+                    var url = (URL_BASE + URL_PEDIDO)
+                        .Replace("[page]", page.ToString())
+                        .Replace("[apikey]", apiKey)
+                        .Replace("dataInicial", dataInicial)
+                        .Replace("dataFinal", $"{DateTime.Today.Day}/{DateTime.Today.Month}/{DateTime.Today.Year}");
+
+                    client = new RestClient(url);
                     request = new RestRequest(Method.GET);
                     request.AddHeader("content-type", "application/json;charset=utf-8");
                     response = client.Execute(request);
