@@ -309,7 +309,7 @@ namespace BlingImportador
                 var produto = ConsultaProduto(item["codigo"]);
 
                 // campos do produto
-                var nomeProduto = ((string)item["descricao"]).Left(50);
+                var nomeProduto = ((string)(!string.IsNullOrEmpty(produto.descricao) ? produto.descricao : (string)item["descricao"])).Left(50);
                 var qtde = decimal.ToInt32(Convert.ToDecimal(((string)item["quantidade"]).Replace(".", ",")));
                 var valorTotalItem = decimal.Parse(((string)item["valorunidade"]).Replace(".", ",")) * qtde;
 
@@ -349,7 +349,7 @@ namespace BlingImportador
                         , cep.Left(9)                                                       // CEP
                         , telefone.Left(100)                                                // Telefone
                         , email.Left(100)                                                   // Email
-                        , "Teste"                                                           // Observacoes
+                        , ""                                                           // Observacoes
                     );
 
                 qtdeProdutos++;
