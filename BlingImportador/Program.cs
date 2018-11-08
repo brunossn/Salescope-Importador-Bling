@@ -298,7 +298,7 @@ namespace BlingImportador
             else
             {
                 cnpjParte1 = cnpjSemPonto.Substring(0, 8);
-                cnpjParte2 = cnpjSemPonto.Substring(7, 4);
+                cnpjParte2 = cnpjSemPonto.Substring(8, 4);
             }
             #endregion
 
