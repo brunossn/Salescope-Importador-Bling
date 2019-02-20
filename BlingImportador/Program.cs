@@ -6,6 +6,7 @@ using System.Json;
 using System.Linq;
 using System.Text;
 using BlingImportador.Helpers;
+using System.Reflection;
 
 namespace BlingImportador
 {
@@ -118,7 +119,8 @@ namespace BlingImportador
             logger.Info("Carregar lista de Produtos...");
 
             // Gravando os produtos em uma solução NoSQL local, para evitar realizar muitas consultas na API Rest.
-            using (var db = new LiteDB.LiteDatabase(@"app.db"))
+            var banco = Path.Combine(Path.GetDirectoryName(Assembly.GetEntryAssembly().Location), "app.db");
+            using (var db = new LiteDB.LiteDatabase(banco))
             {
                 IRestResponse response;
 
@@ -179,7 +181,8 @@ namespace BlingImportador
         private static Produto ConsultaProduto(string codigo)
         {
             // Acessando a base de dados de produtos
-            using (var db = new LiteDB.LiteDatabase(@"app.db"))
+            var banco = Path.Combine(Path.GetDirectoryName(Assembly.GetEntryAssembly().Location), "app.db");
+            using (var db = new LiteDB.LiteDatabase(banco))
             {
                 var produtosDB = db.GetCollection<Produto>("produtos");
                 var produto = produtosDB.Find(p => p.codigo.Equals(codigo)).FirstOrDefault();
@@ -305,6 +308,10 @@ namespace BlingImportador
             foreach (dynamic aux in itens)
             {
                 var item = aux["item"];
+
+                if (string.IsNullOrWhiteSpace(item["codigo"]))
+                    throw new Exception($"Produto '{item["descricao"]}' não possui código.");
+
                 // Consultando o produto na lista pré-carregada
                 var produto = ConsultaProduto(item["codigo"]);
 
@@ -354,6 +361,7 @@ namespace BlingImportador
 
                 qtdeProdutos++;
             }
+
             return registro;
         }
 
