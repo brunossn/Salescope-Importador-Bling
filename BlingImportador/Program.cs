@@ -274,15 +274,22 @@ namespace BlingImportador
             if (notaFiscal != null && (notaFiscal["situacao"] == "3" || notaFiscal["situacao"] == "5" || notaFiscal["situacao"] == "10"))
                 return null;
 
+            // Ignorar clientes em branco
+            if (cliente == null || string.IsNullOrWhiteSpace((string)cliente["cnpj"]))
+            {
+                logger.Error($"Cliente da nota {notaFiscal["numero"]} não encontrado.");
+                return null;
+            }
+
             // Obtendo os dados comuns por pedido ou nota
             var nf = notaFiscal == null ? (string)pedido["numero"] : ((string)notaFiscal["numero"]).Left(10);
             var filial = "MATRIZ";
             var estado = (string)cliente["uf"];
             var cidade = ((string)cliente["cidade"]).Left(50);
-            var situacao = notaFiscal == null ? "PEDIDO EM ABERTO" : "NOTA EMITIDA";
-            var gerente = "Interno";
+            var situacao = notaFiscal == null ? "Pedido em aberto" : "Nota emitida";
+            var gerente = "";
             var representante = pedido["vendedor"] != null ? (string)pedido["vendedor"] : "";
-            var canal = "Varejo";
+            var canal = "";
             var segmento = "";
             var nomeCliente = ((string)cliente["nome"]).Left(50);
             var complementar = "";
