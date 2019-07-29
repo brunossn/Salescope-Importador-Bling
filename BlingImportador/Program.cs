@@ -54,20 +54,20 @@ namespace BlingImportador
             InicializarLog();
             CarregarProdutos();
 
-            try
-            {
+            //try
+            //{
                 logger.Info("Iniciando importação...");
                 GerarArquivo(argumentosSemD[1]);
                 logger.Info("Importação finalizada, arquivo gerado com sucesso");
-            }
-            catch (Exception e)
+            //}
+            /*catch (Exception e)
             {
                 logger.Error(e, "Erro ao realizar a importação: ");
             }
             finally
             {
                 logger.Info("Quantidade de requests: " + qtdeRequest);
-            }
+            }*/
 
             // Parâmetro -d. Indica execução em Daemon
             if (args.Contains("-d"))
@@ -317,56 +317,60 @@ namespace BlingImportador
                 var item = aux["item"];
 
                 if (string.IsNullOrWhiteSpace(item["codigo"]))
-                    throw new Exception($"Produto '{item["descricao"]}' não possui código.");
+                {
+                    logger.Error($"Produto '{item["descricao"]}' não possui código.");
+                }
+                else
+                {
+                    // Consultando o produto na lista pré-carregada
+                    var produto = ConsultaProduto(item["codigo"]);
 
-                // Consultando o produto na lista pré-carregada
-                var produto = ConsultaProduto(item["codigo"]);
+                    // campos do produto
+                    var nomeProduto = ((string)(!string.IsNullOrEmpty(produto.descricao) ? produto.descricao : (string)item["descricao"])).Left(50);
+                    var qtde = decimal.ToInt32(Convert.ToDecimal(((string)item["quantidade"]).Replace(".", ",")));
+                    var valorTotalItem = decimal.Parse(((string)item["valorunidade"]).Replace(".", ",")) * qtde;
 
-                // campos do produto
-                var nomeProduto = ((string)(!string.IsNullOrEmpty(produto.descricao) ? produto.descricao : (string)item["descricao"])).Left(50);
-                var qtde = decimal.ToInt32(Convert.ToDecimal(((string)item["quantidade"]).Replace(".", ",")));
-                var valorTotalItem = decimal.Parse(((string)item["valorunidade"]).Replace(".", ",")) * qtde;
+                    // Criando uma linha nova para cada registro, quando já foi regitrado o primeiro item
+                    if (!String.IsNullOrEmpty(registro)) registro += Environment.NewLine;
 
-                // Criando uma linha nova para cada registro, quando já foi regitrado o primeiro item
-                if (!String.IsNullOrEmpty(registro)) registro += Environment.NewLine;
+                    // Gerando a string com os dados necessários e concatenando.
+                    registro += String.Format("{0};{1};{2};{3};{4};{5};{6};{7};{8};{9};{10};{11};{12};{13};{14};{15};{16};{17};{18};{19};{20};{21};{22};{23};{24};{25};{26};{27};{28};{29};{30};{31}"
+                            , nf.Left(10)                                                       // Nota Fiscal ou Pedido
+                            , filial.Left(50)                                                   // Filial
+                            , estado.Left(2)                                                    // Estado
+                            , cidade.Left(50)                                                   // Cidade
+                            , situacao                                                          // Região (usado para situação)
+                            , gerente.Left(50)                                                  // Gerente
+                            , representante.Left(50)                                            // Representante
+                            , canal.Left(50)                                                    // Canal
+                            , segmento.Left(50)                                                 // Segmento
+                            , produto.marca != null ? ((string)produto.marca).Left(50) : ""     // Marca
+                            , ""                                                                // Linha Produto
+                            , produto.grupoProduto != null ? ((string)produto.grupoProduto).Left(50) : "" // Produto
+                            , ""                                                                // Subgrupo
+                            , nomeProduto.Left(50)                                              // Descricao
+                            , nomeCliente.Left(100)                                             // Cliente
+                            , complementar.Left(50)                                             // Coringa
+                            , dataEmissao.ToString("dd")                                        // dia
+                            , dataEmissao.ToString("MM")                                        // mes
+                            , dataEmissao.ToString("yyyy")                                      // ano
+                            , valorTotalItem.ToString("N")                                      // valor do item
+                            , valorTotalItem.ToString("N")                                      // rentabilidade
+                            , qtde.ToString()                                                   // quantidade
+                            , "0"                                                               // litros
+                            , "0"                                                               // quilos
+                            , "0"                                                               // metros
+                            , cnpjParte1.Left(8)                                                // CNPJ
+                            , cnpjParte2.Left(4)                                                // CNPJ_FILIAL
+                            , endereco.Left(150)                                                // Endereço
+                            , cep.Left(9)                                                       // CEP
+                            , telefone.Left(100)                                                // Telefone
+                            , email.Left(100)                                                   // Email
+                            , ""                                                           // Observacoes
+                        );
 
-                // Gerando a string com os dados necessários e concatenando.
-                registro += String.Format("{0};{1};{2};{3};{4};{5};{6};{7};{8};{9};{10};{11};{12};{13};{14};{15};{16};{17};{18};{19};{20};{21};{22};{23};{24};{25};{26};{27};{28};{29};{30};{31}"
-                        , nf.Left(10)                                                       // Nota Fiscal ou Pedido
-                        , filial.Left(50)                                                   // Filial
-                        , estado.Left(2)                                                    // Estado
-                        , cidade.Left(50)                                                   // Cidade
-                        , situacao                                                          // Região (usado para situação)
-                        , gerente.Left(50)                                                  // Gerente
-                        , representante.Left(50)                                            // Representante
-                        , canal.Left(50)                                                    // Canal
-                        , segmento.Left(50)                                                 // Segmento
-                        , produto.marca != null ? produto.marca.Left(50) : ""               // Marca
-                        , ""                                                                // Linha Produto
-                        , produto.grupoProduto != null ? produto.grupoProduto.Left(50) : "" // Produto
-                        , ""                                                                // Subgrupo
-                        , nomeProduto.Left(50)                                              // Descricao
-                        , nomeCliente.Left(100)                                             // Cliente
-                        , complementar.Left(50)                                             // Coringa
-                        , dataEmissao.ToString("dd")                                        // dia
-                        , dataEmissao.ToString("MM")                                        // mes
-                        , dataEmissao.ToString("yyyy")                                      // ano
-                        , valorTotalItem.ToString("N")                                      // valor do item
-                        , valorTotalItem.ToString("N")                                      // rentabilidade
-                        , qtde.ToString()                                                   // quantidade
-                        , "0"                                                               // litros
-                        , "0"                                                               // quilos
-                        , "0"                                                               // metros
-                        , cnpjParte1.Left(8)                                                // CNPJ
-                        , cnpjParte2.Left(4)                                                // CNPJ_FILIAL
-                        , endereco.Left(150)                                                // Endereço
-                        , cep.Left(9)                                                       // CEP
-                        , telefone.Left(100)                                                // Telefone
-                        , email.Left(100)                                                   // Email
-                        , ""                                                           // Observacoes
-                    );
-
-                qtdeProdutos++;
+                    qtdeProdutos++;
+                }
             }
 
             return registro;
