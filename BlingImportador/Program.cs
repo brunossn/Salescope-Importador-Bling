@@ -7,6 +7,7 @@ using System.Linq;
 using System.Text;
 using BlingImportador.Helpers;
 using System.Reflection;
+using System.Collections.Generic;
 
 namespace BlingImportador
 {
@@ -36,6 +37,8 @@ namespace BlingImportador
         /// <param name="args">Parâmetros do programa</param>
         static void Main(string[] args)
         {
+            MensagemDeAbertura();
+
             if (!ValidaParametros(args)) 
             {
                 if (args.Contains("-d"))
@@ -54,20 +57,16 @@ namespace BlingImportador
             InicializarLog();
             CarregarProdutos();
 
-            //try
-            //{
+            try
+            {
                 logger.Info("Iniciando importação...");
                 GerarArquivo(argumentosSemD[1]);
                 logger.Info("Importação finalizada, arquivo gerado com sucesso");
-            //}
-            /*catch (Exception e)
+            }
+            catch (Exception e)
             {
                 logger.Error(e, "Erro ao realizar a importação: ");
             }
-            finally
-            {
-                logger.Info("Quantidade de requests: " + qtdeRequest);
-            }*/
 
             // Parâmetro -d. Indica execução em Daemon
             if (args.Contains("-d"))
@@ -75,6 +74,12 @@ namespace BlingImportador
                 Console.WriteLine("Importação concluída, pressione qualquer tecla para continuar...");
                 Console.ReadKey();
             }
+        }
+
+        private static void MensagemDeAbertura()
+        {
+            var versao = typeof(Program).Assembly.GetName().Version.ToString();
+            Console.WriteLine($"Integrador Bling, versão {versao}\n");
         }
 
         private static bool ValidaParametros(string[] args)
@@ -271,7 +276,8 @@ namespace BlingImportador
             dynamic itens = pedido["itens"];
 
             // AS notas com status 3 = Cancelada, 5 = Rejeitada ou 10 = Denegada devem ser descartadas.
-            if (notaFiscal != null && (notaFiscal["situacao"] == "3" || notaFiscal["situacao"] == "5" || notaFiscal["situacao"] == "10"))
+            var situacoesDescartadas = new List<string>() { "3", "5", "10" };
+            if (notaFiscal != null && situacoesDescartadas.Contains(notaFiscal["situacao"]?.ToString() ?? ""))
                 return null;
 
             // Ignorar clientes em branco
