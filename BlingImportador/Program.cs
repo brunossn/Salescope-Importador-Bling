@@ -13,9 +13,10 @@ namespace BlingImportador
 {
     class Program
     {
-        static Logger logger;
-        static string apiKey;
-        static string dataInicial;
+        static Logger _logger;
+        static string _apiKey;
+        static string _nomeFilial;
+        static string _dataInicial;
 
         const string NOME_ARQUIVO_LOG = "importador.log";
         const string LAYOUT_ARQUIVO_LOG = "${longdate}|${level}|${message} ${exception:format=tostring,data:maxInnerExceptionLevel=10:separator=\t}";
@@ -51,21 +52,22 @@ namespace BlingImportador
 
             var argumentosSemD = args.Where(a => a != "-d").ToArray();
 
-            apiKey = argumentosSemD[0];
-            dataInicial = argumentosSemD[2];
+            _nomeFilial = argumentosSemD[0];
+            _apiKey = argumentosSemD[1];
+            _dataInicial = argumentosSemD[3];
 
             InicializarLog();
             CarregarProdutos();
 
             try
             {
-                logger.Info("Iniciando importação...");
-                GerarArquivo(argumentosSemD[1]);
-                logger.Info("Importação finalizada, arquivo gerado com sucesso");
+                _logger.Info("Iniciando importação...");
+                GerarArquivo(argumentosSemD[2]);
+                _logger.Info("Importação finalizada, arquivo gerado com sucesso");
             }
             catch (Exception e)
             {
-                logger.Error(e, "Erro ao realizar a importação: ");
+                _logger.Error(e, "Erro ao realizar a importação: ");
             }
 
             // Parâmetro -d. Indica execução em Daemon
@@ -84,19 +86,21 @@ namespace BlingImportador
 
         private static bool ValidaParametros(string[] args)
         {
+            const int ARGUMENTOS_ESPERADOS = 4;
+
             var argumentosSemD = args.Where(a => a != "-d").ToArray();
 
             // Número de argumentos
-            if (argumentosSemD.Count() != 3)
+            if (argumentosSemD.Count() != ARGUMENTOS_ESPERADOS)
             {
                 Console.WriteLine("Execute novamente o importador passando parâmetros, no seguinte formato:");
-                Console.WriteLine("BlingImportador.exe [token do cliente no Bling] [caminho do CSV que será gerado] [data inicial].");
+                Console.WriteLine("BlingImportador.exe [nome da filial] [token do cliente no Bling] [caminho do CSV que será gerado] [data inicial].");
                 Console.WriteLine("Exemplo: BlingImportador.exe b1dbaad81019d6js8ad00si \"c:\\Salescope\\Saida.csv\" 01/01/2010");
                 return false;
             }
 
             // Diretório de saída
-            var diretorio = Path.GetDirectoryName(argumentosSemD[1]);
+            var diretorio = Path.GetDirectoryName(argumentosSemD[2]);
 
             if(!Directory.Exists(diretorio))
             {
@@ -121,7 +125,7 @@ namespace BlingImportador
             // Paginação
             int page = 1;
 
-            logger.Info("Carregar lista de Produtos...");
+            _logger.Info("Carregar lista de Produtos...");
 
             // Gravando os produtos em uma solução NoSQL local, para evitar realizar muitas consultas na API Rest.
             var banco = Path.Combine(Path.GetDirectoryName(Assembly.GetEntryAssembly().Location), "app.db");
@@ -135,9 +139,9 @@ namespace BlingImportador
 
                 do
                 {
-                    logger.Info($"Carregando produtos página {page}...");
+                    _logger.Info($"Carregando produtos página {page}...");
 
-                    var client = new RestClient((URL_BASE + URL_PRODUTO).Replace("[page]", page.ToString()).Replace("[apikey]", apiKey));
+                    var client = new RestClient((URL_BASE + URL_PRODUTO).Replace("[page]", page.ToString()).Replace("[apikey]", _apiKey));
                     var request = new RestRequest(Method.GET);
                     response = client.Execute(request);
 
@@ -170,12 +174,12 @@ namespace BlingImportador
                             produtosDB.Insert(produto);
                         }
                     }
-                    logger.Info($"Produtos da página {page} carregados");
+                    _logger.Info($"Produtos da página {page} carregados");
                     page++;
                 } while (response.StatusCode == System.Net.HttpStatusCode.OK && JsonValue.Parse(response.Content)["retorno"].ContainsKey("produtos")); // Continua enquanto houver produto
             }
 
-            logger.Info("Lista de produtos carregada");
+            _logger.Info("Lista de produtos carregada");
         }
 
         /// <summary>
@@ -229,8 +233,8 @@ namespace BlingImportador
                     // Inicializando o request na api rest, para cada página
                     var url = (URL_BASE + URL_PEDIDO)
                         .Replace("[page]", page.ToString())
-                        .Replace("[apikey]", apiKey)
-                        .Replace("dataInicial", dataInicial)
+                        .Replace("[apikey]", _apiKey)
+                        .Replace("dataInicial", _dataInicial)
                         .Replace("dataFinal", $"{DateTime.Today.Day}/{DateTime.Today.Month}/{DateTime.Today.Year}");
 
                     client = new RestClient(url);
@@ -243,7 +247,7 @@ namespace BlingImportador
 
                     if (response.StatusCode == System.Net.HttpStatusCode.OK && JsonValue.Parse(response.Content)["retorno"].ContainsKey("pedidos"))
                     {
-                        logger.Info($"Importando pedidos (página {page})...");
+                        _logger.Info($"Importando pedidos (página {page})...");
 
                         // Acessando a lista de pedidos do json retornado  
                         dynamic listPedidosJson = JsonValue.Parse(response.Content)["retorno"]["pedidos"];
@@ -255,7 +259,7 @@ namespace BlingImportador
                             if(!String.IsNullOrEmpty(registro)) sw.WriteLine(registro);
                         }
 
-                        logger.Info($"Pedidos da página {page} importados com sucesso");
+                        _logger.Info($"Pedidos da página {page} importados com sucesso");
                         page++; // Incrementando a paginação, pois a lista não retorna o número de paginas. Deve varrer até não poder mais.
                     }
                 } while (response.StatusCode == System.Net.HttpStatusCode.OK && JsonValue.Parse(response.Content)["retorno"].ContainsKey("pedidos")); // Finalizando quando não houver mais pedidos
@@ -283,13 +287,13 @@ namespace BlingImportador
             // Ignorar clientes em branco
             if (cliente == null || string.IsNullOrWhiteSpace((string)cliente["cnpj"]))
             {
-                logger.Error($"Cliente da nota {notaFiscal["numero"]} não encontrado.");
+                _logger.Error($"Cliente da nota {notaFiscal["numero"]} não encontrado.");
                 return null;
             }
 
             // Obtendo os dados comuns por pedido ou nota
             var nf = notaFiscal == null ? (string)pedido["numero"] : ((string)notaFiscal["numero"]).Left(10);
-            var filial = "MATRIZ";
+            var filial = _nomeFilial;
             var estado = (string)cliente["uf"];
             var cidade = ((string)cliente["cidade"]).Left(50);
             var situacao = notaFiscal == null ? "Pedido em aberto" : "Nota emitida";
@@ -324,7 +328,7 @@ namespace BlingImportador
 
                 if (string.IsNullOrWhiteSpace(item["codigo"]))
                 {
-                    logger.Error($"Produto '{item["descricao"]}' não possui código.");
+                    _logger.Error($"Produto '{item["descricao"]}' não possui código.");
                 }
                 else
                 {
@@ -404,7 +408,7 @@ namespace BlingImportador
 
             LogManager.Configuration = config;
 
-            logger = LogManager.GetCurrentClassLogger();
+            _logger = LogManager.GetCurrentClassLogger();
         }
     }
 }
