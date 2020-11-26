@@ -8,6 +8,7 @@ using System.Text;
 using BlingImportador.Helpers;
 using System.Reflection;
 using System.Collections.Generic;
+using System.Text.RegularExpressions;
 
 namespace BlingImportador
 {
@@ -24,7 +25,9 @@ namespace BlingImportador
 
         const string URL_BASE = "https://bling.com.br/Api/v2/";
         const string URL_PEDIDO = "pedidos/page=[page]/json?filters=idSituacao[9];dataEmissao[dataInicial TO dataFinal]&apikey=[apikey]";
-        const string URL_PRODUTO = "produtos/page=[page]/json?apikey=[apikey]";
+        const string URL_PRODUTO_ATIVO = "produtos/page=[page]/json?apikey=[apikey]&filters=situacao[A]";
+        const string URL_PRODUTO_INATIVO = "produtos/page=[page]/json?apikey=[apikey]&filters=situacao[I]";
+        const string URL_GRUPOPRODUTO = "gruposprodutos/json?apikey=[apikey]";
 
         //const string CABECALHO_KEY = "NF; Filial; Estado; Cidade; Região; Gerente; Representante; Canal; Segmento; Marca; Linha; Grupo; Subgrupo; Produto; Cliente; Coringa; Dia; Mês; Ano; Valor; Rentabilidade; Quantidade; Litros; Quilos; Metros; CNPJ - Inicio; CNPJ - Fim; Endereço; CEP; Telefone; Email; Observações do cliente";
         const string CABECALHO_KEY = "";
@@ -57,13 +60,23 @@ namespace BlingImportador
             _dataInicial = argumentosSemD[3];
 
             InicializarLog();
-            CarregarProdutos();
+            CarregarGrupoProdutos();
+            DestruirProdutos();
+
+            _logger.Info("Carregar lista de Produtos Ativos...");
+            CarregarProdutos(URL_PRODUTO_ATIVO);
+            _logger.Info("Carregar lista de Produtos Ativos OK!");
+
+            _logger.Info("Carregar lista de Produtos Inativos ...");
+            CarregarProdutos(URL_PRODUTO_INATIVO);
+            _logger.Info("Carregar lista de Produtos Inativos OK!");
+
+            _logger.Info("Iniciando importação...");
+            GerarArquivo(argumentosSemD[2]);
+            _logger.Info("Importação finalizada, arquivo gerado com sucesso");
 
             try
             {
-                _logger.Info("Iniciando importação...");
-                GerarArquivo(argumentosSemD[2]);
-                _logger.Info("Importação finalizada, arquivo gerado com sucesso");
             }
             catch (Exception e)
             {
@@ -116,32 +129,94 @@ namespace BlingImportador
 
             return true;
         }
-        
+
         /// <summary>
         /// Método que carrega os produtos, pois na consulta de pedidos da API Rest, os itens não carregam os dados mercadológicos
         /// </summary>
-        private static void CarregarProdutos()
+        private static void CarregarGrupoProdutos() {
+            _logger.Info("Carregar Grupo Produtos...");
+
+            // Gravando os produtos em uma solução NoSQL local, para evitar realizar muitas consultas na API Rest.
+            var banco = Path.Combine(Path.GetDirectoryName(Assembly.GetEntryAssembly().Location), "app.db");
+            using (var db = new LiteDB.LiteDatabase(banco)) {
+                IRestResponse response;
+
+                // A cada importação, a lista de produtos é destruida para sempre pegar uma listagem nova
+                db.DropCollection("gruposprodutos");
+                var gruposProdutosDB = db.GetCollection<GrupoProduto>("gruposprodutos");
+
+                var client = new RestClient((URL_BASE + URL_GRUPOPRODUTO).Replace("[apikey]", _apiKey));
+                var request = new RestRequest(Method.GET);
+                response = client.Execute(request);
+
+                // Contando os requests para logar. Isso vai ajudar a mensurar quantas requisições estão sendo feitas por execução
+                qtdeRequest++;
+
+                if (response.StatusCode == System.Net.HttpStatusCode.OK && JsonValue.Parse(response.Content)["retorno"].ContainsKey("gruposprodutos")) {
+                    var listGruposProdutosJson = (JsonArray)JsonValue.Parse(response.Content)["retorno"]["gruposprodutos"];
+
+                    foreach (var grupoProdutoAux in listGruposProdutosJson) {
+                            
+                        var grupoProduto = new GrupoProduto {
+                            Id = grupoProdutoAux["id"],
+                            nome = (string)grupoProdutoAux["nome"],
+                            idPai = grupoProdutoAux["idPai"],
+                            nomePai = grupoProdutoAux["nomePai"],
+                        };
+                        gruposProdutosDB.Insert(grupoProduto);
+                    }
+                }
+            }
+
+            _logger.Info("Lista de Grupos Produtos carregada");
+        }
+
+        /// <summary>
+        /// Método que consulta um produtos para acessar seus dados mercadológicos
+        /// </summary>
+        /// <param name="codigo">Código do produto oriundo dos itens do pedido</param>
+        /// <returns>Produto Consultado</returns>
+        private static GrupoProduto ConsultaGrupoProduto(string codigo) {
+            // Acessando a base de dados de produtos
+            var banco = Path.Combine(Path.GetDirectoryName(Assembly.GetEntryAssembly().Location), "app.db");
+            using (var db = new LiteDB.LiteDatabase(banco)) {
+                var gruposProdutosDB = db.GetCollection<GrupoProduto>("gruposprodutos");
+                var grupoProduto = gruposProdutosDB.Find(p => p.Id.Equals(codigo)).FirstOrDefault();
+                return grupoProduto;
+            }
+        }
+
+        private static void DestruirProdutos() {
+            // Gravando os produtos em uma solução NoSQL local, para evitar realizar muitas consultas na API Rest.
+            var banco = Path.Combine(Path.GetDirectoryName(Assembly.GetEntryAssembly().Location), "app.db");
+            using (var db = new LiteDB.LiteDatabase(banco)) {
+                // A cada importação, a lista de produtos é destruida para sempre pegar uma listagem nova
+                db.DropCollection("produtos");
+            }
+        }
+
+        /// <summary>
+        /// Método que carrega os produtos, pois na consulta de pedidos da API Rest, os itens não carregam os dados mercadológicos
+        /// </summary>
+        private static void CarregarProdutos(string _URLPRODUTO)
         {
             // Paginação
             int page = 1;
 
-            _logger.Info("Carregar lista de Produtos...");
+            _logger.Info($"{_URLPRODUTO}");
 
             // Gravando os produtos em uma solução NoSQL local, para evitar realizar muitas consultas na API Rest.
             var banco = Path.Combine(Path.GetDirectoryName(Assembly.GetEntryAssembly().Location), "app.db");
             using (var db = new LiteDB.LiteDatabase(banco))
             {
                 IRestResponse response;
-
-                // A cada importação, a lista de produtos é destruida para sempre pegar uma listagem nova
-                db.DropCollection("produtos");
                 var produtosDB = db.GetCollection<Produto>("produtos");
 
                 do
                 {
                     _logger.Info($"Carregando produtos página {page}...");
 
-                    var client = new RestClient((URL_BASE + URL_PRODUTO).Replace("[page]", page.ToString()).Replace("[apikey]", _apiKey));
+                    var client = new RestClient((URL_BASE + _URLPRODUTO).Replace("[page]", page.ToString()).Replace("[apikey]", _apiKey));
                     var request = new RestRequest(Method.GET);
                     response = client.Execute(request);
 
@@ -178,8 +253,6 @@ namespace BlingImportador
                     page++;
                 } while (response.StatusCode == System.Net.HttpStatusCode.OK && JsonValue.Parse(response.Content)["retorno"].ContainsKey("produtos")); // Continua enquanto houver produto
             }
-
-            _logger.Info("Lista de produtos carregada");
         }
 
         /// <summary>
@@ -277,6 +350,10 @@ namespace BlingImportador
             string registro = "";
             dynamic cliente = pedido["cliente"];
             dynamic notaFiscal = ((JsonObject)pedido).Keys.Contains("nota") ? pedido["nota"] : null;
+
+            if (!((JsonObject)pedido).Keys.Contains("itens")) 
+                return null;
+
             dynamic itens = pedido["itens"];
 
             // AS notas com status 3 = Cancelada, 5 = Rejeitada ou 10 = Denegada devem ser descartadas.
@@ -287,7 +364,10 @@ namespace BlingImportador
             // Ignorar clientes em branco
             if (cliente == null || string.IsNullOrWhiteSpace((string)cliente["cnpj"]))
             {
-                _logger.Error($"Cliente da nota {notaFiscal["numero"]} não encontrado.");
+                if(notaFiscal == null)
+                    _logger.Error($"Cliente do pedido {(string)pedido["numero"]} não encontrado.");
+                else
+                    _logger.Error($"Cliente da nota {notaFiscal["numero"]} não encontrado.");
                 return null;
             }
 
@@ -308,8 +388,48 @@ namespace BlingImportador
             var cep = (string)cliente["cep"];
             var telefone = String.IsNullOrEmpty((string)cliente["fone"]) ? NAO_DISPONIVEL : ((string)cliente["fone"]).Replace("(", "").Replace(")", "").Replace("-", "").Replace(" ", "");
             var email = String.IsNullOrEmpty((string)cliente["email"]) ? NAO_DISPONIVEL : ((string)cliente["email"]).Left(100);
+            
+            var qtdeTotalItens = QtdeTotalPedido(itens);
+            var valorFrete = (decimal)pedido["valorfrete"];
+            var valorFretePorItem = valorFrete / qtdeTotalItens;
+
+            var transportadora = "";
+            var tipoFrete = "";
+
+            if (!((JsonObject)pedido).Keys.Contains("transporte")) {
+                transportadora = "Retirada";
+                tipoFrete = "ND";
+            }
+            else if (((JsonObject)pedido["transporte"]).Keys.Contains("servico_correios")){
+                transportadora = (string)pedido["transporte"]["servico_correios"];
+                tipoFrete = "FOB";
+            }
+            else {
+                transportadora = (string)pedido["transporte"]["transportadora"];
+                tipoFrete = (string)pedido["transporte"]["tipo_frete"] == "D" ? "FOB" : "CIF";
+            }
+
+            var auxFormaPgto = "";
+            if (!((JsonObject)pedido).Keys.Contains("parcelas")) {
+                auxFormaPgto = "Não Informado";
+            } else {
+                auxFormaPgto = (string)pedido["parcelas"][0]["parcela"]["forma_pagamento"]["descricao"];
+            }
+
+            var formaPgto = "";
+
+            if (auxFormaPgto.ToUpper().Contains("BOLETO")) {
+                formaPgto = "Boleto";
+            }
+            else if (auxFormaPgto.ToUpper().Contains("DINHEIRO")) {
+                formaPgto = "Dinheiro";
+            } 
+            else {
+                formaPgto = "Cartão";
+            }
 
             #region Tratamento do CNPJ
+            var tipoCliente = ""; 
             string cnpjSemPonto = ((string)cliente["cnpj"]).ToString().Replace(".", "").Replace("/", "").Replace("-", "");
             string cnpjParte1 = "", cnpjParte2 = "";
 
@@ -320,6 +440,16 @@ namespace BlingImportador
                 cnpjParte1 = cnpjSemPonto.Substring(0, 8);
                 cnpjParte2 = cnpjSemPonto.Substring(8, 4);
             }
+
+            if(Regex.IsMatch((string)cliente["cnpj"], @"(^(\d{2}.\d{3}.\d{3}/\d{4}-\d{2})$)")){
+                tipoCliente = "Pessoa Jurídica";
+            }
+            else if (Regex.IsMatch((string)cliente["cnpj"], @"(^(\d{3}.\d{3}.\d{3}-\d{2})$)")) {
+                tipoCliente = "Pessoa Física";
+            } else {
+                tipoCliente = "Indefinido";
+            }
+
             #endregion
 
             foreach (dynamic aux in itens)
@@ -333,57 +463,95 @@ namespace BlingImportador
                 else
                 {
                     // Consultando o produto na lista pré-carregada
-                    var produto = ConsultaProduto(item["codigo"]);
+                    Produto produto = ConsultaProduto(item["codigo"]);
+                    var nomeGrupoProduto = "";
+
+                    if (produto != null) {
+                        GrupoProduto grupoProduto = (GrupoProduto)ConsultaGrupoProduto(produto.grupoProduto);
+                        nomeGrupoProduto = grupoProduto != null ? grupoProduto.nome : "";
+                    }
 
                     // campos do produto
-                    var nomeProduto = ((string)(!string.IsNullOrEmpty(produto.descricao) ? produto.descricao : (string)item["descricao"])).Left(50);
+                    var nomeProduto = ((string)(!string.IsNullOrEmpty(produto?.descricao) ? produto?.descricao : (string)item["descricao"])).Left(50);
                     var qtde = decimal.ToInt32(Convert.ToDecimal(((string)item["quantidade"]).Replace(".", ",")));
                     var valorTotalItem = decimal.Parse(((string)item["valorunidade"]).Replace(".", ",")) * qtde;
+                    var valorFreteRateado = valorFretePorItem * qtde;
 
                     // Criando uma linha nova para cada registro, quando já foi regitrado o primeiro item
                     if (!String.IsNullOrEmpty(registro)) registro += Environment.NewLine;
 
                     // Gerando a string com os dados necessários e concatenando.
-                    registro += String.Format("{0};{1};{2};{3};{4};{5};{6};{7};{8};{9};{10};{11};{12};{13};{14};{15};{16};{17};{18};{19};{20};{21};{22};{23};{24};{25};{26};{27};{28};{29};{30};{31}"
-                            , nf.Left(10)                                                       // Nota Fiscal ou Pedido
-                            , filial.Left(50)                                                   // Filial
-                            , estado.Left(2)                                                    // Estado
-                            , cidade.Left(50)                                                   // Cidade
-                            , situacao                                                          // Região (usado para situação)
-                            , gerente.Left(50)                                                  // Gerente
-                            , representante.Left(50)                                            // Representante
-                            , canal.Left(50)                                                    // Canal
-                            , segmento.Left(50)                                                 // Segmento
-                            , produto.marca != null ? ((string)produto.marca).Left(50) : ""     // Marca
-                            , ""                                                                // Linha Produto
-                            , produto.grupoProduto != null ? ((string)produto.grupoProduto).Left(50) : "" // Produto
-                            , ""                                                                // Subgrupo
-                            , nomeProduto.Left(50)                                              // Descricao
-                            , nomeCliente.Left(100)                                             // Cliente
-                            , complementar.Left(50)                                             // Coringa
-                            , dataEmissao.ToString("dd")                                        // dia
-                            , dataEmissao.ToString("MM")                                        // mes
-                            , dataEmissao.ToString("yyyy")                                      // ano
-                            , valorTotalItem.ToString("N")                                      // valor do item
-                            , valorTotalItem.ToString("N")                                      // rentabilidade
-                            , qtde.ToString()                                                   // quantidade
-                            , "0"                                                               // litros
-                            , "0"                                                               // quilos
-                            , "0"                                                               // metros
-                            , cnpjParte1.Left(8)                                                // CNPJ
-                            , cnpjParte2.Left(4)                                                // CNPJ_FILIAL
-                            , endereco.Left(150)                                                // Endereço
-                            , cep.Left(9)                                                       // CEP
-                            , telefone.Left(100)                                                // Telefone
-                            , email.Left(100)                                                   // Email
-                            , ""                                                           // Observacoes
-                        );
+                    // var stringRegistro = string.Join(";", new string[]
+                    registro = string.Join(";", new string[] {
+                        nf.Left(10)                                                       // Nota Fiscal ou Pedido
+                        , filial.Left(50)                                                   // Filial
+                        , estado.Left(2)                                                    // Estado
+                        , cidade.Left(50)                                                   // Cidade
+                        , situacao                                                          // Região (usado para situação)
+                        , gerente.Left(50)                                                  // Gerente
+                        , representante.Left(50)                                            // Representante
+                        , canal.Left(50)                                                    // Canal
+                        , segmento.Left(50)                                                 // Segmento
+                        , produto?.marca != null ? ((string)produto.marca).Left(50) : ""     // Marca
+                        , ""                                                                // Linha Produto
+                        , produto?.grupoProduto != null ? ((string)produto.grupoProduto).Left(50) : "" // Produto
+                        , ""                                                                // Subgrupo
+                        , nomeProduto.Left(50)                                              // Descricao
+                        , nomeCliente.Left(100)                                             // Cliente
+                        , complementar.Left(50)                                             // Coringa
+                        , dataEmissao.ToString("dd")                                        // dia
+                        , dataEmissao.ToString("MM")                                        // mes
+                        , dataEmissao.ToString("yyyy")                                      // ano
+                        , valorTotalItem.ToString("N")                                      // valor do item
+                        , valorTotalItem.ToString("N")                                      // rentabilidade
+                        , qtde.ToString()                                                   // quantidade
+                        , "0"                                                               // litros
+                        , "0"                                                               // quilos
+                        , "0"                                                               // metros
+                        , cnpjParte1.Left(8)                                                // CNPJ
+                        , cnpjParte2.Left(4)                                                // CNPJ_FILIAL
+                        , endereco.Left(150)                                                // Endereço
+                        , cep.Left(9)                                                       // CEP
+                        , telefone.Left(100)                                                // Telefone
+                        , email.Left(100)                                                   // Email
+                        , ""                                                                // Observacoes
+                        , valorFreteRateado.ToString("N")                                   // Frete - > Valor monetário adicional
+                        , (valorTotalItem - valorFreteRateado).ToString("N")                // Valor monetário adicional
+                        , ""                                                                // Valor monetário adicional
+                        , ""                                                                // Valor monetário adicional
+                        , ""                                                                // Valor monetário adicional
+                        , transportadora                                                    // Transportadora --> Informação adicional de pedido
+                        , tipoFrete                                                         // Tipo Frete --> Informação adicional de pedido
+                        , formaPgto                                                         // Informação adicional de pedido
+                        , ""                                                                // Informação adicional de pedido
+                        , ""                                                                // Informação adicional de pedido
+                        , ""                                                                // Informação adicional de produto
+                        , ""                                                                // Informação adicional de produto
+                        , ""                                                                // Informação adicional de produto
+                        , ""                                                                // Informação adicional de produto
+                        , ""                                                                // Informação adicional de produto
+                        , tipoCliente                                                       // TipoCliente -->  Informação adicional de cliente
+                        , ""                                                                // Informação adicional de cliente
+                        , ""                                                                // Informação adicional de cliente
+                        , ""                                                                // Informação adicional de cliente
+                        , ""                                                                // Informação adicional de cliente
+                    });
 
                     qtdeProdutos++;
                 }
             }
 
             return registro;
+        }
+
+        private static decimal QtdeTotalPedido(dynamic itens) {
+            decimal qtde = 0;
+
+            foreach(dynamic item in itens) {
+                qtde += decimal.ToInt32(Convert.ToDecimal(((string)item["item"]["quantidade"]).Replace(".", ",")));
+            }
+
+            return qtde;
         }
 
         /// <summary>

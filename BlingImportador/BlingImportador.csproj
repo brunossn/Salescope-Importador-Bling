@@ -62,6 +62,7 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="GrupoProduto.cs" />
     <Compile Include="Helpers\StringExtensions.cs" />
     <Compile Include="Produto.cs" />
     <Compile Include="Program.cs" />
