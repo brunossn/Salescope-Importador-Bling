@@ -33,7 +33,7 @@ namespace BlingImportador
         const string CABECALHO_KEY = "";
         const string NAO_DISPONIVEL = "ND";
 
-        static int qtdeRequest = 0, qtdeProdutos = 0;
+        static int qtdeRequest = 0, qtdeProdutos = 0, totalPaginasPedidos = 0;
 
         /// <summary>
         /// Método inicial
@@ -60,6 +60,7 @@ namespace BlingImportador
             _dataInicial = argumentosSemD[3];
 
             InicializarLog();
+            ObterUltimaPaginaPedidos();
             CarregarGrupoProdutos();
             DestruirProdutos();
 
@@ -271,6 +272,43 @@ namespace BlingImportador
                 return produto;
             }
         }
+
+
+        private static void ObterUltimaPaginaPedidos() {
+            RestClient client = null;
+            RestRequest request = null;
+            IRestResponse response = null; // objeto responsavel por realizar a consulta;
+
+            int minPagina = 0, maxPagina = 10000, count = 0;
+            int numPagina = (int)Math.Ceiling(Convert.ToDouble(maxPagina - ((maxPagina - minPagina) / 2)));
+            
+            do {
+
+                var url = (URL_BASE + URL_PEDIDO)
+                            .Replace("[page]", numPagina.ToString())
+                            .Replace("[apikey]", _apiKey)
+                            .Replace("dataInicial", _dataInicial)
+                            .Replace("dataFinal", $"{DateTime.Today.Day}/{DateTime.Today.Month}/{DateTime.Today.Year}");
+
+                client = new RestClient(url);
+                request = new RestRequest(Method.GET);
+                request.AddHeader("content-type", "application/json;charset=utf-8");
+                response = client.Execute(request);
+
+                if (response.StatusCode == System.Net.HttpStatusCode.OK) {
+                    if (JsonValue.Parse(response.Content)["retorno"].ContainsKey("erros")) {
+                        maxPagina = numPagina - 1;
+                    } else if(JsonValue.Parse(response.Content)["retorno"].ContainsKey("pedidos")) {
+                        minPagina = numPagina;
+                    }
+                    numPagina = (int)Math.Ceiling(Convert.ToDouble(maxPagina - ((maxPagina - minPagina) / 2)));
+                }
+                count++;
+            } while (minPagina != maxPagina);
+
+            totalPaginasPedidos = numPagina;
+        }
+
 
         /// <summary>
         /// Método que realiza a criação do arquivo e gravação dos registros
