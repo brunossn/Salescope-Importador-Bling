@@ -9,6 +9,9 @@ using BlingImportador.Helpers;
 using System.Reflection;
 using System.Collections.Generic;
 using System.Text.RegularExpressions;
+using System.Collections.Concurrent;
+using System.Threading.Tasks;
+using System.Threading;
 
 namespace BlingImportador
 {
@@ -18,6 +21,7 @@ namespace BlingImportador
         static string _apiKey;
         static string _nomeFilial;
         static string _dataInicial;
+        static string ARQUIVO_CSV = "";
 
         const string NOME_ARQUIVO_LOG = "importador.log";
         const string LAYOUT_ARQUIVO_LOG = "${longdate}|${level}|${message} ${exception:format=tostring,data:maxInnerExceptionLevel=10:separator=\t}";
@@ -28,10 +32,12 @@ namespace BlingImportador
         const string URL_PRODUTO_ATIVO = "produtos/page=[page]/json?apikey=[apikey]&filters=situacao[A]";
         const string URL_PRODUTO_INATIVO = "produtos/page=[page]/json?apikey=[apikey]&filters=situacao[I]";
         const string URL_GRUPOPRODUTO = "gruposprodutos/json?apikey=[apikey]";
-
-        //const string CABECALHO_KEY = "NF; Filial; Estado; Cidade; Região; Gerente; Representante; Canal; Segmento; Marca; Linha; Grupo; Subgrupo; Produto; Cliente; Coringa; Dia; Mês; Ano; Valor; Rentabilidade; Quantidade; Litros; Quilos; Metros; CNPJ - Inicio; CNPJ - Fim; Endereço; CEP; Telefone; Email; Observações do cliente";
-        const string CABECALHO_KEY = "";
+        
         const string NAO_DISPONIVEL = "ND";
+
+        static ConcurrentBag<GrupoProduto> _gruposProduto = new ConcurrentBag<GrupoProduto>();
+        static ConcurrentBag<Produto> _produtos = new ConcurrentBag<Produto>();
+        static ConcurrentBag<dynamic> _pedidos = new ConcurrentBag<dynamic>();
 
         static int qtdeRequest = 0, qtdeProdutos = 0, totalPaginasPedidos = 0;
 
@@ -39,7 +45,7 @@ namespace BlingImportador
         /// Método inicial
         /// </summary>
         /// <param name="args">Parâmetros do programa</param>
-        static void Main(string[] args)
+        static async Task Main(string[] args)
         {
             MensagemDeAbertura();
 
@@ -58,26 +64,35 @@ namespace BlingImportador
             _nomeFilial = argumentosSemD[0];
             _apiKey = argumentosSemD[1];
             _dataInicial = argumentosSemD[3];
-
-            InicializarLog();
-            ObterUltimaPaginaPedidos();
-            CarregarGrupoProdutos();
-            DestruirProdutos();
-
-            _logger.Info("Carregar lista de Produtos Ativos...");
-            CarregarProdutos(URL_PRODUTO_ATIVO);
-            _logger.Info("Carregar lista de Produtos Ativos OK!");
-
-            _logger.Info("Carregar lista de Produtos Inativos ...");
-            CarregarProdutos(URL_PRODUTO_INATIVO);
-            _logger.Info("Carregar lista de Produtos Inativos OK!");
-
-            _logger.Info("Iniciando importação...");
-            GerarArquivo(argumentosSemD[2]);
-            _logger.Info("Importação finalizada, arquivo gerado com sucesso");
+            ARQUIVO_CSV = argumentosSemD[2];
 
             try
             {
+                InicializarLog();
+                ObterUltimaPaginaPedidos();
+                CarregarGrupoProdutos();
+                
+                _logger.Info("Carregar lista de Produtos Ativos...");
+                CarregarProdutos(URL_PRODUTO_ATIVO);
+                _logger.Info("Carregar lista de Produtos Ativos OK!");
+
+                _logger.Info("Carregar lista de Produtos Inativos ...");
+                CarregarProdutos(URL_PRODUTO_INATIVO);
+                _logger.Info("Carregar lista de Produtos Inativos OK!");
+
+                _logger.Info("Iniciando importação...");
+                CriarArquivo();
+                IniciarFilaArquivoTexto();
+
+                _logger.Info("Carregar lista de Pedidos ...");
+                await ProcessarPedidos();
+                _logger.Info("Carregar lista de Pedidos OK!");
+
+                _logger.Info("Processando pedidos ...");
+                await ProcessarRegistros();
+                _logger.Info("Processando pedidos OK!");
+
+                _logger.Info("Importação finalizada, arquivo gerado com sucesso");
             }
             catch (Exception e)
             {
@@ -137,38 +152,33 @@ namespace BlingImportador
         private static void CarregarGrupoProdutos() {
             _logger.Info("Carregar Grupo Produtos...");
 
-            // Gravando os produtos em uma solução NoSQL local, para evitar realizar muitas consultas na API Rest.
-            var banco = Path.Combine(Path.GetDirectoryName(Assembly.GetEntryAssembly().Location), "app.db");
-            using (var db = new LiteDB.LiteDatabase(banco)) {
-                IRestResponse response;
+            IRestResponse response;
 
-                // A cada importação, a lista de produtos é destruida para sempre pegar uma listagem nova
-                db.DropCollection("gruposprodutos");
-                var gruposProdutosDB = db.GetCollection<GrupoProduto>("gruposprodutos");
+            // A cada importação, a lista de produtos é destruida para sempre pegar uma listagem nova
+            
 
-                var client = new RestClient((URL_BASE + URL_GRUPOPRODUTO).Replace("[apikey]", _apiKey));
-                var request = new RestRequest(Method.GET);
-                response = client.Execute(request);
+            var client = new RestClient((URL_BASE + URL_GRUPOPRODUTO).Replace("[apikey]", _apiKey));
+            var request = new RestRequest(Method.GET);
+            response = client.Execute(request);
 
-                // Contando os requests para logar. Isso vai ajudar a mensurar quantas requisições estão sendo feitas por execução
-                qtdeRequest++;
+            // Contando os requests para logar. Isso vai ajudar a mensurar quantas requisições estão sendo feitas por execução
+            qtdeRequest++;
 
-                if (response.StatusCode == System.Net.HttpStatusCode.OK && JsonValue.Parse(response.Content)["retorno"].ContainsKey("gruposprodutos")) {
-                    var listGruposProdutosJson = (JsonArray)JsonValue.Parse(response.Content)["retorno"]["gruposprodutos"];
+            if (response.StatusCode == System.Net.HttpStatusCode.OK && JsonValue.Parse(response.Content)["retorno"].ContainsKey("gruposprodutos")) {
+                var listGruposProdutosJson = (JsonArray)JsonValue.Parse(response.Content)["retorno"]["gruposprodutos"];
 
-                    foreach (var grupoProdutoAux in listGruposProdutosJson) {
+                foreach (var grupoProdutoAux in listGruposProdutosJson) {
                             
-                        var grupoProduto = new GrupoProduto {
-                            Id = grupoProdutoAux["id"],
-                            nome = (string)grupoProdutoAux["nome"],
-                            idPai = grupoProdutoAux["idPai"],
-                            nomePai = grupoProdutoAux["nomePai"],
-                        };
-                        gruposProdutosDB.Insert(grupoProduto);
-                    }
+                    var grupoProduto = new GrupoProduto {
+                        Id = grupoProdutoAux["id"],
+                        nome = (string)grupoProdutoAux["nome"],
+                        idPai = grupoProdutoAux["idPai"],
+                        nomePai = grupoProdutoAux["nomePai"],
+                    };
+            
+                _gruposProduto.Add(grupoProduto);
                 }
             }
-
             _logger.Info("Lista de Grupos Produtos carregada");
         }
 
@@ -178,23 +188,18 @@ namespace BlingImportador
         /// <param name="codigo">Código do produto oriundo dos itens do pedido</param>
         /// <returns>Produto Consultado</returns>
         private static GrupoProduto ConsultaGrupoProduto(string codigo) {
-            // Acessando a base de dados de produtos
-            var banco = Path.Combine(Path.GetDirectoryName(Assembly.GetEntryAssembly().Location), "app.db");
-            using (var db = new LiteDB.LiteDatabase(banco)) {
-                var gruposProdutosDB = db.GetCollection<GrupoProduto>("gruposprodutos");
-                var grupoProduto = gruposProdutosDB.Find(p => p.Id.Equals(codigo)).FirstOrDefault();
-                return grupoProduto;
-            }
+            var grupoProduto = _gruposProduto.Where(p => p.Id.Equals(codigo)).FirstOrDefault();
+            return grupoProduto;
         }
 
-        private static void DestruirProdutos() {
-            // Gravando os produtos em uma solução NoSQL local, para evitar realizar muitas consultas na API Rest.
-            var banco = Path.Combine(Path.GetDirectoryName(Assembly.GetEntryAssembly().Location), "app.db");
-            using (var db = new LiteDB.LiteDatabase(banco)) {
-                // A cada importação, a lista de produtos é destruida para sempre pegar uma listagem nova
-                db.DropCollection("produtos");
-            }
-        }
+        //private static void DestruirProdutos() {
+        //    // Gravando os produtos em uma solução NoSQL local, para evitar realizar muitas consultas na API Rest.
+        //    var banco = Path.Combine(Path.GetDirectoryName(Assembly.GetEntryAssembly().Location), "app.db");
+        //    using (var db = new LiteDB.LiteDatabase(banco)) {
+        //        // A cada importação, a lista de produtos é destruida para sempre pegar uma listagem nova
+        //        db.DropCollection("produtos");
+        //    }
+        //}
 
         /// <summary>
         /// Método que carrega os produtos, pois na consulta de pedidos da API Rest, os itens não carregam os dados mercadológicos
@@ -203,57 +208,46 @@ namespace BlingImportador
         {
             // Paginação
             int page = 1;
-
-            _logger.Info($"{_URLPRODUTO}");
-
-            // Gravando os produtos em uma solução NoSQL local, para evitar realizar muitas consultas na API Rest.
-            var banco = Path.Combine(Path.GetDirectoryName(Assembly.GetEntryAssembly().Location), "app.db");
-            using (var db = new LiteDB.LiteDatabase(banco))
+            IRestResponse response;            
+            do
             {
-                IRestResponse response;
-                var produtosDB = db.GetCollection<Produto>("produtos");
+                // _logger.Info($"Carregando produtos página {page}...");
 
-                do
+                var client = new RestClient((URL_BASE + _URLPRODUTO).Replace("[page]", page.ToString()).Replace("[apikey]", _apiKey));
+                var request = new RestRequest(Method.GET);
+                response = client.Execute(request);
+
+                // Contando os requests para logar. Isso vai ajudar a mensurar quantas requisições estão sendo feitas por execução
+                qtdeRequest++;
+
+                if (response.StatusCode == System.Net.HttpStatusCode.OK && JsonValue.Parse(response.Content)["retorno"].ContainsKey("produtos"))
                 {
-                    _logger.Info($"Carregando produtos página {page}...");
+                    var listProdutosJson = (JsonArray)JsonValue.Parse(response.Content)["retorno"]["produtos"];
 
-                    var client = new RestClient((URL_BASE + _URLPRODUTO).Replace("[page]", page.ToString()).Replace("[apikey]", _apiKey));
-                    var request = new RestRequest(Method.GET);
-                    response = client.Execute(request);
-
-                    // Contando os requests para logar. Isso vai ajudar a mensurar quantas requisições estão sendo feitas por execução
-                    qtdeRequest++;
-
-                    if (response.StatusCode == System.Net.HttpStatusCode.OK && JsonValue.Parse(response.Content)["retorno"].ContainsKey("produtos"))
+                    foreach (var linha in listProdutosJson)
                     {
-                        var listProdutosJson = (JsonArray)JsonValue.Parse(response.Content)["retorno"]["produtos"];
-
-                        foreach (var linha in listProdutosJson)
+                        var produtoAux = linha["produto"];
+                        var produto = new Produto
                         {
-                            var produtoAux = linha["produto"];
-
-                            var produto = new Produto
-                            {
-                                codigo = produtoAux["codigo"],
-                                descricao = (string)produtoAux["descricao"],
-                                unidade = produtoAux["unidade"],
-                                grupoProduto = produtoAux["grupoProduto"],
-                                situacao = produtoAux["situacao"],
-                                nomeFornecedor = produtoAux["nomeFornecedor"],
-                                marca = produtoAux["marca"],
-                                preco = produtoAux["preco"],
-                                precoCusto = produtoAux["precoCusto"],
-                                pesoLiq = produtoAux["pesoLiq"],
-                                dataInclusao = produtoAux["dataInclusao"],
-                                dataAlteracao = produtoAux["dataAlteracao"]
-                            };
-                            produtosDB.Insert(produto);
-                        }
+                            codigo = produtoAux["codigo"],
+                            descricao = (string)produtoAux["descricao"],
+                            unidade = produtoAux["unidade"],
+                            grupoProduto = produtoAux["grupoProduto"],
+                            situacao = produtoAux["situacao"],
+                            nomeFornecedor = produtoAux["nomeFornecedor"],
+                            marca = produtoAux["marca"],
+                            preco = produtoAux["preco"],
+                            precoCusto = produtoAux["precoCusto"],
+                            pesoLiq = produtoAux["pesoLiq"],
+                            dataInclusao = produtoAux["dataInclusao"],
+                            dataAlteracao = produtoAux["dataAlteracao"]
+                        };
+                        _produtos.Add(produto);
                     }
-                    _logger.Info($"Produtos da página {page} carregados");
-                    page++;
-                } while (response.StatusCode == System.Net.HttpStatusCode.OK && JsonValue.Parse(response.Content)["retorno"].ContainsKey("produtos")); // Continua enquanto houver produto
-            }
+                }
+                // _logger.Info($"Carregando produtos página {page} OK!");
+                page++;
+            } while (response.StatusCode == System.Net.HttpStatusCode.OK && JsonValue.Parse(response.Content)["retorno"].ContainsKey("produtos")); // Continua enquanto houver produto
         }
 
         /// <summary>
@@ -263,16 +257,9 @@ namespace BlingImportador
         /// <returns>Produto Consultado</returns>
         private static Produto ConsultaProduto(string codigo)
         {
-            // Acessando a base de dados de produtos
-            var banco = Path.Combine(Path.GetDirectoryName(Assembly.GetEntryAssembly().Location), "app.db");
-            using (var db = new LiteDB.LiteDatabase(banco))
-            {
-                var produtosDB = db.GetCollection<Produto>("produtos");
-                var produto = produtosDB.Find(p => p.codigo.Equals(codigo)).FirstOrDefault();
-                return produto;
-            }
+            var produto = _produtos.Where(p => p.codigo.Equals(codigo)).FirstOrDefault();
+            return produto;
         }
-
 
         private static void ObterUltimaPaginaPedidos() {
             RestClient client = null;
@@ -283,7 +270,6 @@ namespace BlingImportador
             int numPagina = (int)Math.Ceiling(Convert.ToDouble(maxPagina - ((maxPagina - minPagina) / 2)));
             
             do {
-
                 var url = (URL_BASE + URL_PEDIDO)
                             .Replace("[page]", numPagina.ToString())
                             .Replace("[apikey]", _apiKey)
@@ -311,39 +297,28 @@ namespace BlingImportador
 
 
         /// <summary>
-        /// Método que realiza a criação do arquivo e gravação dos registros
+        /// Método que realiza a extração dos pedidos
         /// </summary>
-        private static void GerarArquivo(string arquivoCSV)
+        private static async Task ProcessarPedidos()
         {
-            // A princípio, esta informação é para gerar o arquivo. Deverá ser usado na paginação, para determinar uma data de corte na consulta
-            var dtImportacao = DateTime.Now;
+            async Task ProcessarPedidosAsync() {
+                // A princípio, esta informação é para gerar o arquivo. Deverá ser usado na paginação, para determinar uma data de corte na consulta
+                var dtImportacao = DateTime.Now;
 
-            // Criando o arquivo por data, e com encoding do windows
-            if (!File.Exists(arquivoCSV))
-            {
-                var arquivo = File.Create(arquivoCSV);
-                arquivo.Close();
-            }
+                var paginas = Enumerable.Range(1, totalPaginasPedidos);
 
-            using (var sw = new StreamWriter(arquivoCSV, false, Encoding.GetEncoding(ENCODING_KEY)))
-            {
-                // Paginação
-                int page = 1;
+                await Task.WhenAll(paginas.Select(async pagina => {
+                    // Objetos para manipulação da api rest.
+                    RestClient client = null;
+                    RestRequest request = null;
+                    IRestResponse response = null; // objeto responsavel por realizar a consulta;
 
-                // Objetos para manipulação da api rest.
-                RestClient client = null;
-                RestRequest request = null;
-                IRestResponse response = null; // objeto responsavel por realizar a consulta;
-
-                // Cria a primeira linha do registro que é o cabecalho
-                sw.WriteLine(CABECALHO_KEY);
-
-                // Realizando a paginação
-                do
-                {
+                    // Realizando a paginação
+                    // do
+                    // {
                     // Inicializando o request na api rest, para cada página
                     var url = (URL_BASE + URL_PEDIDO)
-                        .Replace("[page]", page.ToString())
+                        .Replace("[page]", pagina.ToString())
                         .Replace("[apikey]", _apiKey)
                         .Replace("dataInicial", _dataInicial)
                         .Replace("dataFinal", $"{DateTime.Today.Day}/{DateTime.Today.Month}/{DateTime.Today.Year}");
@@ -351,31 +326,53 @@ namespace BlingImportador
                     client = new RestClient(url);
                     request = new RestRequest(Method.GET);
                     request.AddHeader("content-type", "application/json;charset=utf-8");
-                    response = client.Execute(request);
+                    var cancellationTokenSource = new CancellationTokenSource();
+                    response = await client.ExecuteTaskAsync(request, cancellationTokenSource.Token);
 
                     // Contando os requests para logar. Isso vai ajudar a mensurar quantas requisições estão sendo feitas por execução
                     qtdeRequest++;
 
-                    if (response.StatusCode == System.Net.HttpStatusCode.OK && JsonValue.Parse(response.Content)["retorno"].ContainsKey("pedidos"))
-                    {
-                        _logger.Info($"Importando pedidos (página {page})...");
+                    if (response.StatusCode == System.Net.HttpStatusCode.OK && JsonValue.Parse(response.Content)["retorno"].ContainsKey("pedidos")) {
+                        _logger.Info($"Importando pedidos da página {pagina} ...");
 
                         // Acessando a lista de pedidos do json retornado  
                         dynamic listPedidosJson = JsonValue.Parse(response.Content)["retorno"]["pedidos"];
 
-                        foreach (var linha in listPedidosJson)
-                        {
+                        foreach (var linha in listPedidosJson) {
                             dynamic pedido = linha["pedido"];
-                            string registro = ExtrairRegistroFormatoSalescope(pedido);
-                            if(!String.IsNullOrEmpty(registro)) sw.WriteLine(registro);
+                            _pedidos.Add(pedido);
                         }
-
-                        _logger.Info($"Pedidos da página {page} importados com sucesso");
-                        page++; // Incrementando a paginação, pois a lista não retorna o número de paginas. Deve varrer até não poder mais.
+                        _logger.Info($"Importando pedidos da página {pagina} OK!");
                     }
-                } while (response.StatusCode == System.Net.HttpStatusCode.OK && JsonValue.Parse(response.Content)["retorno"].ContainsKey("pedidos")); // Finalizando quando não houver mais pedidos
-            }
+                }));
+                // } while (response.StatusCode == System.Net.HttpStatusCode.OK && JsonValue.Parse(response.Content)["retorno"].ContainsKey("pedidos")); // Finalizando quando não houver mais pedidos
+            };
+
+            await ProcessarPedidosAsync();
         }
+
+        /// <summary>
+        /// Método que realiza a extração dos pedidos
+        /// </summary>
+        private static async Task ProcessarRegistros() {
+            async Task ProcessarRegistrosAsync() {
+                await Task.WhenAll(_pedidos.Select(async pedido => {
+                    _logger.Info($"Importando pedido {pedido["numero"]} ...");
+                    await Task.Run(() => {
+                        string registro = ExtrairRegistroFormatoSalescope(pedido);
+                        if (!String.IsNullOrEmpty(registro)) {
+                            EscreverRegistroArquivo(registro);
+                            _logger.Info($"Importando pedido {pedido["numero"]} OK! ");
+                        } else {
+                            _logger.Info($"Importando pedido {pedido["numero"]} Não Importado! ");
+                        }
+                    });
+                }));
+            };
+
+            await ProcessarRegistrosAsync();
+        }
+
 
         /// <summary>
         /// Método que extraí os dados necessários para a criação do arquivo
@@ -385,7 +382,6 @@ namespace BlingImportador
         private static string ExtrairRegistroFormatoSalescope(dynamic pedido)
         {
             // Inicializando os objetos
-            string registro = "";
             dynamic cliente = pedido["cliente"];
             dynamic notaFiscal = ((JsonObject)pedido).Keys.Contains("nota") ? pedido["nota"] : null;
 
@@ -427,9 +423,16 @@ namespace BlingImportador
             var telefone = String.IsNullOrEmpty((string)cliente["fone"]) ? NAO_DISPONIVEL : ((string)cliente["fone"]).Replace("(", "").Replace(")", "").Replace("-", "").Replace(" ", "");
             var email = String.IsNullOrEmpty((string)cliente["email"]) ? NAO_DISPONIVEL : ((string)cliente["email"]).Left(100);
             
+            //TODO Tratar itens com quantidade zerada
             var qtdeTotalItens = QtdeTotalPedido(itens);
             var valorFrete = (decimal)pedido["valorfrete"];
-            var valorFretePorItem = valorFrete / qtdeTotalItens;
+            decimal valorFretePorItem;
+
+            if (qtdeTotalItens > 0)
+                valorFretePorItem = (valorFrete / qtdeTotalItens);
+            else
+                valorFretePorItem = 0;
+
 
             var transportadora = "";
             var tipoFrete = "";
@@ -437,14 +440,15 @@ namespace BlingImportador
             if (!((JsonObject)pedido).Keys.Contains("transporte")) {
                 transportadora = "Retirada";
                 tipoFrete = "ND";
-            }
-            else if (((JsonObject)pedido["transporte"]).Keys.Contains("servico_correios")){
+            } else if (((JsonObject)pedido["transporte"]).Keys.Contains("servico_correios")) {
                 transportadora = (string)pedido["transporte"]["servico_correios"];
                 tipoFrete = "FOB";
-            }
-            else {
+            } else if (((JsonObject)pedido["transporte"]).Keys.Contains("transportadora")) {
                 transportadora = (string)pedido["transporte"]["transportadora"];
                 tipoFrete = (string)pedido["transporte"]["tipo_frete"] == "D" ? "FOB" : "CIF";
+            } else {
+                transportadora = "Não Informado";
+                tipoFrete = "ND";
             }
 
             var auxFormaPgto = "";
@@ -489,6 +493,8 @@ namespace BlingImportador
             }
 
             #endregion
+            
+            var registro = new StringBuilder();
 
             foreach (dynamic aux in itens)
             {
@@ -510,17 +516,16 @@ namespace BlingImportador
                     }
 
                     // campos do produto
+                    //TODO Tratar itens com quantidade zerada
                     var nomeProduto = ((string)(!string.IsNullOrEmpty(produto?.descricao) ? produto?.descricao : (string)item["descricao"])).Left(50);
                     var qtde = decimal.ToInt32(Convert.ToDecimal(((string)item["quantidade"]).Replace(".", ",")));
                     var valorTotalItem = decimal.Parse(((string)item["valorunidade"]).Replace(".", ",")) * qtde;
                     var valorFreteRateado = valorFretePorItem * qtde;
 
                     // Criando uma linha nova para cada registro, quando já foi regitrado o primeiro item
-                    if (!String.IsNullOrEmpty(registro)) registro += Environment.NewLine;
-
                     // Gerando a string com os dados necessários e concatenando.
-                    // var stringRegistro = string.Join(";", new string[]
-                    registro = string.Join(";", new string[] {
+                    var stringRegistro = string.Join(";", new string[] 
+                    {
                         nf.Left(10)                                                       // Nota Fiscal ou Pedido
                         , filial.Left(50)                                                   // Filial
                         , estado.Left(2)                                                    // Estado
@@ -558,9 +563,9 @@ namespace BlingImportador
                         , ""                                                                // Valor monetário adicional
                         , ""                                                                // Valor monetário adicional
                         , ""                                                                // Valor monetário adicional
-                        , transportadora                                                    // Transportadora --> Informação adicional de pedido
-                        , tipoFrete                                                         // Tipo Frete --> Informação adicional de pedido
-                        , formaPgto                                                         // Informação adicional de pedido
+                        , transportadora.Left(50)                                           // Transportadora --> Informação adicional de pedido
+                        , tipoFrete.Left(50)                                                // Tipo Frete --> Informação adicional de pedido
+                        , formaPgto.Left(50)                                                // Informação adicional de pedido
                         , ""                                                                // Informação adicional de pedido
                         , ""                                                                // Informação adicional de pedido
                         , ""                                                                // Informação adicional de produto
@@ -568,18 +573,16 @@ namespace BlingImportador
                         , ""                                                                // Informação adicional de produto
                         , ""                                                                // Informação adicional de produto
                         , ""                                                                // Informação adicional de produto
-                        , tipoCliente                                                       // TipoCliente -->  Informação adicional de cliente
+                        , tipoCliente.Left(50)                                              // TipoCliente -->  Informação adicional de cliente
                         , ""                                                                // Informação adicional de cliente
                         , ""                                                                // Informação adicional de cliente
                         , ""                                                                // Informação adicional de cliente
                         , ""                                                                // Informação adicional de cliente
                     });
-
-                    qtdeProdutos++;
+                    registro.AppendLine(stringRegistro);
                 }
             }
-
-            return registro;
+            return registro.ToString();
         }
 
         private static decimal QtdeTotalPedido(dynamic itens) {
@@ -616,5 +619,40 @@ namespace BlingImportador
 
             _logger = LogManager.GetCurrentClassLogger();
         }
+
+        private static void CriarArquivo() {
+            if (File.Exists(ARQUIVO_CSV)) File.Delete(ARQUIVO_CSV);
+            var arquivo = File.Create(ARQUIVO_CSV);
+            arquivo.Close();
+
+            var sw = new StreamWriter(ARQUIVO_CSV, true, Encoding.GetEncoding(ENCODING_KEY));
+            sw.Flush();
+            sw.Close();
+        }
+
+        static ConcurrentQueue<string> itemsToWrite = new ConcurrentQueue<string>();
+        static bool done = false;
+        private static void EscreverRegistroArquivo(string registro, bool force = false) {
+            itemsToWrite.Enqueue(registro);
+        }
+
+        static void IniciarFilaArquivoTexto() {
+            Task consumerTask = new Task(ProcessaFilaArquivoTexto);
+            consumerTask.Start();
+        }
+
+        static void ProcessaFilaArquivoTexto() {
+            using (StreamWriter fileout = new StreamWriter(ARQUIVO_CSV, true, Encoding.GetEncoding(ENCODING_KEY))) {
+                fileout.AutoFlush = true;
+                while (done == false) {
+                    string itemToWrite;
+                    while (itemsToWrite.TryDequeue(out itemToWrite)) {
+                        fileout.Write(itemToWrite);
+                    }
+                    Thread.Sleep(10);
+                }
+            }
+        }
+
     }
 }
