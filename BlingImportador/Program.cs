@@ -425,13 +425,18 @@ namespace BlingImportador
             
             //TODO Tratar itens com quantidade zerada
             var qtdeTotalItens = QtdeTotalPedido(itens);
-            var valorFrete = (decimal)pedido["valorfrete"];
-            decimal valorFretePorItem;
+            var valorFrete = ((JsonObject)pedido).Keys.Contains("valorfrete") ? (decimal)pedido["valorfrete"] : 0;
+            var valorDesconto = ((JsonObject)pedido).Keys.Contains("desconto") ? Convert.ToDecimal((((string)pedido["desconto"]).Replace("%", ""))) : 0;
+            
+            decimal valorFretePorItem, valorDescontoPorItem;
 
-            if (qtdeTotalItens > 0)
+            if (qtdeTotalItens > 0) {
                 valorFretePorItem = (valorFrete / qtdeTotalItens);
-            else
+                valorDescontoPorItem = (valorDesconto / qtdeTotalItens);
+            } else {
                 valorFretePorItem = 0;
+                valorDescontoPorItem = 0;
+            }
 
 
             var transportadora = "";
@@ -521,6 +526,7 @@ namespace BlingImportador
                     var qtde = decimal.ToInt32(Convert.ToDecimal(((string)item["quantidade"]).Replace(".", ",")));
                     var valorTotalItem = decimal.Parse(((string)item["valorunidade"]).Replace(".", ",")) * qtde;
                     var valorFreteRateado = valorFretePorItem * qtde;
+                    var valorDescontoRateado = valorDescontoPorItem * qtde;
 
                     // Criando uma linha nova para cada registro, quando já foi regitrado o primeiro item
                     // Gerando a string com os dados necessários e concatenando.
@@ -558,8 +564,8 @@ namespace BlingImportador
                         , telefone.Left(100)                                                // Telefone
                         , email.Left(100)                                                   // Email
                         , ""                                                                // Observacoes
-                        , valorFreteRateado.ToString("N")                                   // Frete - > Valor monetário adicional
-                        , (valorTotalItem - valorFreteRateado).ToString("N")                // Valor monetário adicional
+                        , valorFreteRateado.ToString()                                      // Frete - > Valor monetário adicional
+                        , (valorTotalItem - valorDescontoRateado).ToString("N")             // Valor monetário adicional
                         , ""                                                                // Valor monetário adicional
                         , ""                                                                // Valor monetário adicional
                         , ""                                                                // Valor monetário adicional
