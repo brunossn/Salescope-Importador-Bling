@@ -565,7 +565,7 @@ namespace BlingImportador
                         , email.Left(100)                                                   // Email
                         , ""                                                                // Observacoes
                         , valorFreteRateado.ToString()                                      // Frete - > Valor monetário adicional
-                        , (valorTotalItem - valorDescontoRateado).ToString("N")             // Valor monetário adicional
+                        , (valorTotalItem - valorDescontoRateado).ToString()                // Valor monetário adicional
                         , ""                                                                // Valor monetário adicional
                         , ""                                                                // Valor monetário adicional
                         , ""                                                                // Valor monetário adicional
