@@ -89,7 +89,8 @@ namespace BlingImportador
                 _logger.Info("Carregar lista de Pedidos OK!");
 
                 _logger.Info("Processando pedidos ...");
-                await ProcessarRegistros();
+                // await ProcessarRegistros();
+                ProcessarRegistros2();
                 _logger.Info("Processando pedidos OK!");
 
                 _logger.Info("Importação finalizada, arquivo gerado com sucesso");
@@ -357,20 +358,33 @@ namespace BlingImportador
         private static async Task ProcessarRegistros() {
             async Task ProcessarRegistrosAsync() {
                 await Task.WhenAll(_pedidos.Select(async pedido => {
-                    _logger.Info($"Importando pedido {pedido["numero"]} ...");
+                    _logger.Info($"Processando pedido {pedido["numero"]} ...");
                     await Task.Run(() => {
                         string registro = ExtrairRegistroFormatoSalescope(pedido);
                         if (!String.IsNullOrEmpty(registro)) {
                             EscreverRegistroArquivo(registro);
-                            _logger.Info($"Importando pedido {pedido["numero"]} OK! ");
+                            _logger.Info($"Processando pedido {pedido["numero"]} OK! ");
                         } else {
-                            _logger.Info($"Importando pedido {pedido["numero"]} Não Importado! ");
+                            _logger.Info($"Processando pedido {pedido["numero"]} Não Importado! ");
                         }
                     });
                 }));
             };
 
             await ProcessarRegistrosAsync();
+        }
+
+        private static void ProcessarRegistros2() {
+            foreach (var pedido in _pedidos) {
+                _logger.Info($"Processando pedido {pedido["numero"]} ...");
+                string registro = ExtrairRegistroFormatoSalescope(pedido);
+                if (!String.IsNullOrEmpty(registro)) {
+                    EscreverRegistroArquivo(registro);
+                    _logger.Info($"Processando pedido {pedido["numero"]} OK! ");
+                } else {
+                    _logger.Info($"Processando pedido {pedido["numero"]} Não Importado! ");
+                }
+            }
         }
 
 
@@ -415,7 +429,7 @@ namespace BlingImportador
             var representante = pedido["vendedor"] != null ? (string)pedido["vendedor"] : "";
             var canal = "";
             var segmento = "";
-            var nomeCliente = ((string)cliente["nome"]).Left(50);
+            var nomeCliente = String.IsNullOrEmpty((string)cliente["nome"]) ? NAO_DISPONIVEL : ((string)cliente["nome"]).Left(50);
             var complementar = "";
             var dataEmissao = notaFiscal == null ? Convert.ToDateTime((string)pedido["data"]) : Convert.ToDateTime((string)notaFiscal["dataEmissao"]);
             var endereco = String.Format("{0}, {1}, {2}", (string)cliente["endereco"], (string)cliente["bairro"], ((string)cliente["numero"]).Left(150));
@@ -545,14 +559,14 @@ namespace BlingImportador
                         , ""                                                                // Linha Produto
                         , produto?.grupoProduto != null ? ((string)produto.grupoProduto).Left(50) : "" // Produto
                         , ""                                                                // Subgrupo
-                        , nomeProduto.Left(50)                                              // Descricao
+                        , nomeProduto.Sanitize().Left(50)                                              // Descricao
                         , nomeCliente.Left(100)                                             // Cliente
                         , complementar.Left(50)                                             // Coringa
                         , dataEmissao.ToString("dd")                                        // dia
                         , dataEmissao.ToString("MM")                                        // mes
                         , dataEmissao.ToString("yyyy")                                      // ano
-                        , valorTotalItem.ToString("N")                                      // valor do item
-                        , valorTotalItem.ToString("N")                                      // rentabilidade
+                        , valorTotalItem.ToString("N").Replace(".","")               // valor do item
+                        , valorTotalItem.ToString("N").Replace(".","")               // rentabilidade
                         , qtde.ToString()                                                   // quantidade
                         , "0"                                                               // litros
                         , "0"                                                               // quilos
