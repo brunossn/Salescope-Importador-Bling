@@ -72,28 +72,28 @@ namespace BlingImportador
                 ObterUltimaPaginaPedidos();
                 CarregarGrupoProdutos();
                 
-                _logger.Info("Carregar lista de Produtos Ativos...");
+                _logger.Info("Carregar produtos ativos: Iniciando...");
                 CarregarProdutos(URL_PRODUTO_ATIVO);
-                _logger.Info("Carregar lista de Produtos Ativos OK!");
+                _logger.Info("Carregar produtos ativos: Concluído");
 
-                _logger.Info("Carregar lista de Produtos Inativos ...");
+                _logger.Info("Carregar produtos inativos: Iniciando...");
                 CarregarProdutos(URL_PRODUTO_INATIVO);
-                _logger.Info("Carregar lista de Produtos Inativos OK!");
+                _logger.Info("Carregar produtos inativos: Concluído");
 
                 _logger.Info("Iniciando importação...");
                 CriarArquivo();
                 IniciarFilaArquivoTexto();
 
-                _logger.Info("Carregar lista de Pedidos ...");
+                _logger.Info("Carregar pedidos: Iniciando...");
                 await ProcessarPedidos();
-                _logger.Info("Carregar lista de Pedidos OK!");
+                _logger.Info("Carregar pedidos: Concluído");
 
-                _logger.Info("Processando pedidos ...");
+                _logger.Info("Processar pedidos: Iniciando...");
                 // await ProcessarRegistros();
                 ProcessarRegistros2();
-                _logger.Info("Processando pedidos OK!");
+                _logger.Info("Processar pedidos: Concluído");
 
-                _logger.Info("Importação finalizada, arquivo gerado com sucesso");
+                _logger.Info("Importação finalizada, arquivo gerado com sucesso.");
             }
             catch (Exception e)
             {
@@ -358,14 +358,10 @@ namespace BlingImportador
         private static async Task ProcessarRegistros() {
             async Task ProcessarRegistrosAsync() {
                 await Task.WhenAll(_pedidos.Select(async pedido => {
-                    _logger.Info($"Processando pedido {pedido["numero"]} ...");
                     await Task.Run(() => {
                         string registro = ExtrairRegistroFormatoSalescope(pedido);
                         if (!String.IsNullOrEmpty(registro)) {
                             EscreverRegistroArquivo(registro);
-                            _logger.Info($"Processando pedido {pedido["numero"]} OK! ");
-                        } else {
-                            _logger.Info($"Processando pedido {pedido["numero"]} Não Importado! ");
                         }
                     });
                 }));
@@ -376,13 +372,9 @@ namespace BlingImportador
 
         private static void ProcessarRegistros2() {
             foreach (var pedido in _pedidos) {
-                _logger.Info($"Processando pedido {pedido["numero"]} ...");
                 string registro = ExtrairRegistroFormatoSalescope(pedido);
                 if (!String.IsNullOrEmpty(registro)) {
                     EscreverRegistroArquivo(registro);
-                    _logger.Info($"Processando pedido {pedido["numero"]} OK! ");
-                } else {
-                    _logger.Info($"Processando pedido {pedido["numero"]} Não Importado! ");
                 }
             }
         }
