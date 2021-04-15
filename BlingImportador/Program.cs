@@ -398,7 +398,7 @@ namespace BlingImportador
 
             // AS notas com status 3 = Cancelada, 5 = Rejeitada ou 10 = Denegada devem ser descartadas.
             var situacoesDescartadas = new List<string>() { "3", "5", "10" };
-            if (notaFiscal != null && situacoesDescartadas.Contains(notaFiscal["situacao"]?.ToString() ?? ""))
+            if (notaFiscal != null && situacoesDescartadas.Contains(notaFiscal["situacao"]?.ToString().Replace("\"", "") ?? ""))
                 return null;
 
             // Ignorar clientes em branco
